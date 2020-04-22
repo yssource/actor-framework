@@ -16,4 +16,13 @@ RUN yum install -y \
   openssl-devel \
  && yum clean all
 
+RUN useradd jenkins -m -s /bin/bash
+
+RUN mkdir /home/jenkins/bin
+RUN chown -R jenkins /home/jenkins
+RUN chgrp -R jenkins /home/jenkins
+
+RUN ln -s /usr/bin/cmake3 /home/jenkins/bin/cmake
+RUN ln -s /usr/bin/ctest3 /home/jenkins/bin/ctest
+
 ENV CXX=/opt/rh/devtoolset-7/root/usr/bin/g++
