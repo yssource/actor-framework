@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <future>
 #include <map>
 #include <set>
@@ -165,6 +166,8 @@ public:
 
   /// Keeps track of nodes that monitor local actors.
   monitored_actor_map monitored_actors;
+
+  std::vector<std::chrono::microseconds> dequeue_ts_;
 };
 
 } // namespace caf::io

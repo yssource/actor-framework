@@ -18,10 +18,12 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "caf/detail/core_export.hpp"
 #include "caf/detail/is_complete.hpp"
@@ -236,6 +238,7 @@ CAF_BEGIN_TYPE_ID_BLOCK(core_module, 0)
   CAF_ADD_TYPE_ID(core_module, (std::u16string))
   CAF_ADD_TYPE_ID(core_module, (std::u32string))
   CAF_ADD_TYPE_ID(core_module, (std::set<std::string>) )
+  CAF_ADD_TYPE_ID(core_module, (std::vector<std::chrono::microseconds>) )
 
   // -- CAF types
 
@@ -317,6 +320,7 @@ CAF_BEGIN_TYPE_ID_BLOCK(core_module, 0)
   CAF_ADD_ATOM(core_module, caf, unsubscribe_atom)
   CAF_ADD_ATOM(core_module, caf, update_atom)
   CAF_ADD_ATOM(core_module, caf, wait_for_atom)
+  CAF_ADD_ATOM(core_module, caf, get_timestamps_atom)
 
 CAF_END_TYPE_ID_BLOCK(core_module)
 

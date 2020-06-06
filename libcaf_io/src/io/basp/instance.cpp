@@ -19,6 +19,7 @@
 #include "caf/io/basp/instance.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 #include "caf/actor_system_config.hpp"
 #include "caf/binary_deserializer.hpp"
@@ -121,8 +122,8 @@ void instance::add_published_actor(uint16_t port,
   swap(entry.second, published_interface);
 }
 
-size_t
-instance::remove_published_actor(uint16_t port, removed_published_actor* cb) {
+size_t instance::remove_published_actor(uint16_t port,
+                                        removed_published_actor* cb) {
   CAF_LOG_TRACE(CAF_ARG(port));
   auto i = published_actors_.find(port);
   if (i == published_actors_.end())
@@ -195,6 +196,8 @@ bool instance::dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
     });
     write(ctx, callee_.get_buffer(path->hdl), hdr, &writer);
   }
+  enqueue_ts_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::system_clock::now().time_since_epoch()));
   flush(*path);
   return true;
 }

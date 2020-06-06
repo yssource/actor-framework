@@ -152,6 +152,9 @@ behavior basp_broker::make_behavior() {
         message_id mid, const message& msg) {
       CAF_LOG_TRACE(CAF_ARG(src)
                     << CAF_ARG(dest) << CAF_ARG(mid) << CAF_ARG(msg));
+      dequeue_ts_.push_back(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::system_clock::now().time_since_epoch()));
       if (!dest || system().node() == dest->node()) {
         CAF_LOG_WARNING("cannot forward to invalid "
                         "or local actor:"
@@ -380,6 +383,9 @@ behavior basp_broker::make_behavior() {
       instance.handle_heartbeat(context());
       delayed_send(this, std::chrono::milliseconds{interval}, tick_atom_v,
                    interval);
+    },
+    [=](get_timestamps_atom) {
+      return make_result(dequeue_ts_, instance.get_enqueue_ts());
     }};
 }
 

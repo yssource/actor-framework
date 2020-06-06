@@ -117,8 +117,8 @@ public:
 
   /// Handles received data and returns a config for receiving the
   /// next data or `none` if an error occured.
-  connection_state handle(execution_unit* ctx,
-                          new_data_msg& dm, header& hdr, bool is_payload);
+  connection_state handle(execution_unit* ctx, new_data_msg& dm, header& hdr,
+                          bool is_payload);
 
   /// Sends heartbeat messages to all valid nodes those are directly connected.
   void handle_heartbeat(execution_unit* ctx);
@@ -139,8 +139,8 @@ public:
                            std::set<std::string> published_interface);
 
   /// Removes the actor currently assigned to `port`.
-  size_t
-  remove_published_actor(uint16_t port, removed_published_actor* cb = nullptr);
+  size_t remove_published_actor(uint16_t port,
+                                removed_published_actor* cb = nullptr);
 
   /// Removes `whom` if it is still assigned to `port` or from all of its
   /// current ports if `port == 0`.
@@ -195,9 +195,9 @@ public:
                              const node_id& dest_node, actor_id aid);
 
   /// Writes a `kill_proxy` to `buf`.
-  void
-  write_down_message(execution_unit* ctx, byte_buffer& buf,
-                     const node_id& dest_node, actor_id aid, const error& rsn);
+  void write_down_message(execution_unit* ctx, byte_buffer& buf,
+                          const node_id& dest_node, actor_id aid,
+                          const error& rsn);
 
   /// Writes a `heartbeat` to `buf`.
   void write_heartbeat(execution_unit* ctx, byte_buffer& buf);
@@ -225,6 +225,10 @@ public:
   connection_state handle(execution_unit* ctx, connection_handle hdl,
                           header& hdr, byte_buffer* payload);
 
+  std::vector<std::chrono::microseconds> get_enqueue_ts() {
+    return enqueue_ts_;
+  }
+
 private:
   void forward(execution_unit* ctx, const node_id& dest_node, const header& hdr,
                byte_buffer& payload);
@@ -235,6 +239,8 @@ private:
   callee& callee_;
   message_queue queue_;
   detail::worker_hub<worker> hub_;
+
+  std::vector<std::chrono::microseconds> enqueue_ts_;
 };
 
 /// @}
