@@ -229,6 +229,14 @@ public:
     return enqueue_ts_;
   }
 
+  void start_timestamping() {
+    timestamping_ = true;
+  }
+
+  void stop_timestamping() {
+    timestamping_ = false;
+  }
+
 private:
   void forward(execution_unit* ctx, const node_id& dest_node, const header& hdr,
                byte_buffer& payload);
@@ -241,6 +249,7 @@ private:
   detail::worker_hub<worker> hub_;
 
   std::vector<std::chrono::microseconds> enqueue_ts_;
+  bool timestamping_ = false;
 };
 
 /// @}

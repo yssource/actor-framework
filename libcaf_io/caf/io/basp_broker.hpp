@@ -168,6 +168,8 @@ public:
   monitored_actor_map monitored_actors;
 
   std::vector<std::chrono::microseconds> dequeue_ts_;
+
+  bool timestamping_;
 };
 
 } // namespace caf::io

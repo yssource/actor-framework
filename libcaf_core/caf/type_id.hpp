@@ -321,6 +321,8 @@ CAF_BEGIN_TYPE_ID_BLOCK(core_module, 0)
   CAF_ADD_ATOM(core_module, caf, update_atom)
   CAF_ADD_ATOM(core_module, caf, wait_for_atom)
   CAF_ADD_ATOM(core_module, caf, get_timestamps_atom)
+  CAF_ADD_ATOM(core_module, caf, start_timestamps_atom)
+  CAF_ADD_ATOM(core_module, caf, stop_timestamps_atom)
 
 CAF_END_TYPE_ID_BLOCK(core_module)
 

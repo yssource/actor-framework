@@ -60,7 +60,8 @@ basp_broker::basp_broker(actor_config& cfg)
   : super(cfg),
     basp::instance::callee(super::system(),
                            static_cast<proxy_registry::backend&>(*this)),
-    this_context(nullptr) {
+    this_context(nullptr),
+    timestamping_(false) {
   new (&instance) basp::instance(this, *this);
   CAF_ASSERT(this_node() != none);
 }
@@ -152,9 +153,10 @@ behavior basp_broker::make_behavior() {
         message_id mid, const message& msg) {
       CAF_LOG_TRACE(CAF_ARG(src)
                     << CAF_ARG(dest) << CAF_ARG(mid) << CAF_ARG(msg));
-      dequeue_ts_.push_back(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::system_clock::now().time_since_epoch()));
+      if (timestamping_)
+        dequeue_ts_.push_back(
+          std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()));
       if (!dest || system().node() == dest->node()) {
         CAF_LOG_WARNING("cannot forward to invalid "
                         "or local actor:"
@@ -386,7 +388,16 @@ behavior basp_broker::make_behavior() {
     },
     [=](get_timestamps_atom) {
       return make_result(dequeue_ts_, instance.get_enqueue_ts());
-    }};
+    },
+    [=](start_timestamps_atom) {
+      timestamping_ = true;
+      instance.start_timestamping();
+    },
+    [=](stop_timestamps_atom) {
+      timestamping_ = false;
+      instance.stop_timestamping();
+    },
+  };
 }
 
 proxy_registry* basp_broker::proxy_registry_ptr() {

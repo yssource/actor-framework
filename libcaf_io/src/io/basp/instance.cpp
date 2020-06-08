@@ -196,8 +196,9 @@ bool instance::dispatch(execution_unit* ctx, const strong_actor_ptr& sender,
     });
     write(ctx, callee_.get_buffer(path->hdl), hdr, &writer);
   }
-  enqueue_ts_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
-    std::chrono::system_clock::now().time_since_epoch()));
+  if (timestamping_)
+    enqueue_ts_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::system_clock::now().time_since_epoch()));
   flush(*path);
   return true;
 }
