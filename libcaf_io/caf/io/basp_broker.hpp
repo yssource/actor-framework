@@ -169,6 +169,8 @@ public:
 
   std::vector<std::chrono::microseconds> dequeue_ts_;
 
+  std::vector<std::chrono::microseconds> new_data_ts_;
+
   bool timestamping_;
 };
 

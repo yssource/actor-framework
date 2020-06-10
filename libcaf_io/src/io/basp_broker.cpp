@@ -64,6 +64,8 @@ basp_broker::basp_broker(actor_config& cfg)
     timestamping_(false) {
   new (&instance) basp::instance(this, *this);
   CAF_ASSERT(this_node() != none);
+  new_data_ts_.reserve(100'000);
+  dequeue_ts_.reserve(100'000);
 }
 
 basp_broker::~basp_broker() {
@@ -131,6 +133,10 @@ behavior basp_broker::make_behavior() {
     // received from underlying broker implementation
     [=](new_data_msg& msg) {
       CAF_LOG_TRACE(CAF_ARG(msg.handle));
+      if (timestamping_)
+        new_data_ts_.push_back(
+          std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()));
       set_context(msg.handle);
       auto& ctx = *this_context;
       auto next = instance.handle(context(), msg, ctx.hdr,
@@ -387,7 +393,7 @@ behavior basp_broker::make_behavior() {
                    interval);
     },
     [=](get_timestamps_atom) {
-      return make_result(dequeue_ts_, instance.get_enqueue_ts());
+      return make_result(dequeue_ts_, new_data_ts_, instance.get_enqueue_ts());
     },
     [=](start_timestamps_atom) {
       timestamping_ = true;
