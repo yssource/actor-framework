@@ -87,36 +87,47 @@ CAF_TEST(integers_to_string) {
   CAF_CHECK_EQUAL(make_message(itup(1, 2, 3)).types()[0], type_id_v<itup>);
 }
 
-CAF_TEST(to_string converts messages to strings) {
-  using svec = vector<string>;
-  CAF_CHECK_EQUAL(msg_as_string(), "message()");
-  CAF_CHECK_EQUAL(msg_as_string("hello", "world"),
-                  R"__(message("hello", "world"))__");
-  CAF_CHECK_EQUAL(
-    msg_as_string(svec{"one", "two", "three"}),
-    R"__(message(std::vector<std::string>(["one", "two", "three"])))__");
-  CAF_CHECK_EQUAL(
-    msg_as_string(svec{"one", "two"}, "three", "four",
-                  svec{"five", "six", "seven"}),
-    R"__(message(std::vector<std::string>(["one", "two"]), "three", "four", )__"
-    R"__(std::vector<std::string>(["five", "six", "seven"])))__");
-  auto teststr = R"__(message("this is a \"test\""))__"; // fails inline on MSVC
-  CAF_CHECK_EQUAL(msg_as_string(R"__(this is a "test")__"), teststr);
-  CAF_CHECK_EQUAL(msg_as_string(make_tuple(1, 2, 3), 4, 5),
-                  "message(std::tuple<int32_t, int32_t, int32_t>([1, 2, 3]), "
-                  "int32_t(4), int32_t(5))");
-  CAF_CHECK_EQUAL(msg_as_string(s1{}), "message(s1([10, 20, 30]))");
-  s2 tmp;
-  tmp.value[0][1] = 100;
-  CAF_CHECK_EQUAL(msg_as_string(s2{}),
-                  "message(s2([[1, 10], [2, 20], [3, 30], [4, 40]]))");
-  CAF_CHECK_EQUAL(msg_as_string(s3{}), "message(s3([1, 2, 3, 4]))");
-}
-
 CAF_TEST(match_elements exposes element types) {
   auto msg = make_message(put_atom_v, "foo", int64_t{123});
   CAF_CHECK((msg.match_element<put_atom>(0)));
   CAF_CHECK((msg.match_element<string>(1)));
   CAF_CHECK((msg.match_element<int64_t>(2)));
   CAF_CHECK((msg.match_elements<put_atom, string, int64_t>()));
+}
+
+CAF_TEST(messages may contain other messages) {
+  auto msg = make_message(make_message(1, 2), make_message(3, 4));
+  if (CAF_CHECK((msg.match_elements<message, message>()))) {
+    CAF_CHECK((msg.get_as<message>(0).match_elements<int, int>()));
+    CAF_CHECK((msg.get_as<message>(1).match_elements<int, int>()));
+  }
+}
+
+CAF_TEST(to_string converts messages to strings) {
+  using svec = vector<string>;
+  CAF_CHECK_EQUAL(msg_as_string(), "caf::message()");
+  CAF_CHECK_EQUAL(msg_as_string("hello", "world"),
+                  R"__(caf::message("hello", "world"))__");
+  CAF_CHECK_EQUAL(
+    msg_as_string(svec{"one", "two", "three"}),
+    R"__(caf::message(std::vector<std::string>(["one", "two", "three"])))__");
+  CAF_CHECK_EQUAL(
+    msg_as_string(svec{"one", "two"}, "three", "four",
+                  svec{"five", "six", "seven"}),
+    R"__(caf::message(std::vector<std::string>(["one", "two"]), "three", "four", )__"
+    R"__(std::vector<std::string>(["five", "six", "seven"])))__");
+  auto teststr = R"__(caf::message("this is a \"test\""))__"; // fails inline on MSVC
+  CAF_CHECK_EQUAL(msg_as_string(R"__(this is a "test")__"), teststr);
+  CAF_CHECK_EQUAL(msg_as_string(make_tuple(1, 2, 3), 4, 5),
+                  "caf::message(std::tuple<int32_t, int32_t, int32_t>([1, 2, 3]), "
+                  "int32_t(4), int32_t(5))");
+  CAF_CHECK_EQUAL(msg_as_string(s1{}), "caf::message(s1([10, 20, 30]))");
+  s2 tmp;
+  tmp.value[0][1] = 100;
+  CAF_CHECK_EQUAL(msg_as_string(s2{}),
+                  "caf::message(s2([[1, 10], [2, 20], [3, 30], [4, 40]]))");
+  CAF_CHECK_EQUAL(msg_as_string(s3{}), "caf::message(s3([1, 2, 3, 4]))");
+  CAF_CHECK_EQUAL(msg_as_string(make_message(1, 2), make_message(3, 4)),
+                  "caf::message(caf::message(int32_t(1), int32_t(2)), "
+                  "caf::message(int32_t(3), int32_t(4)))");
 }

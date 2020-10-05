@@ -307,9 +307,9 @@ bool message::save(binary_serializer& sink) const {
 
 std::string to_string(const message& msg) {
   if (msg.empty())
-    return "message()";
+    return "caf::message()";
   std::string result;
-  result += "message(";
+  result += "caf::message(";
   auto types = msg.types();
   if (!types.empty()) {
     auto ptr = msg.cdata().storage();

@@ -19,6 +19,7 @@
 #pragma once
 
 #include <chrono>
+#include <stack>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -237,7 +238,8 @@ private:
 
   std::string& result_;
 
-  bool in_string_object_ = false;
+  // Tracks what type we currently stringify (via begin_object / end_object).
+  std::stack<type_id_t, std::vector<type_id_t>> objs_;
 };
 
 } // namespace caf::detail

@@ -51,20 +51,33 @@ namespace caf::detail {
 
 bool stringification_inspector::begin_object(string_view name) {
   sep();
-  if (name != "std::string") {
+  // Suppress surrounding parentheses for strings and messages. We print strings
+  // quoted and to_string for message already adds the parentheses.
+  if (name == "std::string") {
+    objs_.push(type_id_v<std::string>);
+  } else if (name == "caf::message") {
+    objs_.push(type_id_v<message>);
+  } else {
+    objs_.push(invalid_type_id); // Don't care value.
     result_.insert(result_.end(), name.begin(), name.end());
     result_ += '(';
-  } else {
-    in_string_object_ = true;
   }
   return ok;
 }
 
 bool stringification_inspector::end_object() {
-  if (!in_string_object_)
-    result_ += ')';
-  else
-    in_string_object_ = false;
+  if (objs_.empty()) {
+    emplace_error(sec::runtime_error,
+                  "mismatching calls to begin_object and end_object");
+    return stop;
+  }
+  switch (objs_.top()) {
+    case type_id_v<std::string>:
+    case type_id_v<message>:
+      break;
+    default:
+      result_ += ')';
+  }
   return ok;
 }
 
