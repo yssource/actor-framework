@@ -54,5 +54,12 @@ SCENARIO("errors provide human-readable to_string output") {
                  R"_(caf::sec::invalid_argument("want foo", "got bar"))_");
       }
     }
+    WHEN("converting an error with a strings containing quotation marks") {
+      THEN("quotation marks are escaped") {
+        CHECK_EQ(
+          err_str(sec::invalid_argument, R"(want "foo")", R"(got "bar")"),
+          R"_(caf::sec::invalid_argument("want \"foo\"", "got \"bar\""))_");
+      }
+    }
   }
 }
