@@ -24,6 +24,9 @@ public:
 
     /// Checks whether the resource has been disposed.
     virtual bool disposed() const noexcept = 0;
+
+    /// Returns a @ref disposable handle to this object.
+    disposable as_disposable() noexcept;
   };
 
   explicit disposable(intrusive_ptr<impl> pimpl) noexcept

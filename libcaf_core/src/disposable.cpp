@@ -10,4 +10,8 @@ disposable::impl::~impl() {
   // nop
 }
 
+disposable disposable::impl::as_disposable() noexcept {
+  return disposable{intrusive_ptr<disposable::impl>{this}};
+}
+
 } // namespace caf
