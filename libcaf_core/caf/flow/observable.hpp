@@ -9,6 +9,9 @@
 #include <type_traits>
 #include <vector>
 
+#include "caf/async/bounded_buffer.hpp"
+#include "caf/async/consumer.hpp"
+#include "caf/async/producer.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/core_export.hpp"
 #include "caf/disposable.hpp"
@@ -26,11 +29,7 @@
 
 namespace caf::flow {
 
-/// An item source that is only visible in the scope of a @ref coordinator. May
-/// the lifted to an @ref async::publisher by the coordinator in order to make
-/// the items visible to other parts of the system.
-///
-/// Observers must belong to the same @ref coordinator as the observable.
+/// Represents a potentially unbound sequence of values.
 template <class T>
 class observable {
 public:
@@ -47,8 +46,8 @@ public:
       // nop
     }
 
-    /// Attaches a new observer.
-    virtual disposable attach(observer<T> what) = 0;
+    /// Subscribes a new observer.
+    virtual disposable subscribe(observer<T> what) = 0;
 
     observable as_observable() noexcept {
       return observable{intrusive_ptr<impl>(this)};
@@ -79,69 +78,62 @@ public:
     return disposable{std::move(pimpl_)};
   }
 
-  /// @copydoc impl::attach
-  disposable attach(observer<T> what) {
+  /// @copydoc impl::subscribe
+  disposable subscribe(observer<T> what) {
     if (pimpl_) {
-      return pimpl_->attach(std::move(what));
+      return pimpl_->subscribe(std::move(what));
     } else {
       what.on_error(make_error(sec::invalid_observable));
       return disposable{};
     }
   }
 
-  /// Transforms items by applying a step function to each input.
+  /// Returns a transformation that applies a step function to each input.
   template <class Step>
   transformation<Step> transform(Step step);
 
+  /// Returns a transformation that selects only the first `n` items.
   transformation<limit_step<T>> take(size_t n);
 
+  /// Returns a transformation that selects only items that satisfy `predicate`.
   template <class Predicate>
   transformation<filter_step<Predicate>> filter(Predicate prediate);
 
-  template <class Fn>
-  transformation<map_step<Fn>> map(Fn fn);
+  /// Returns a transformation that applies `f` to each input and emits the
+  /// result of the function application.
+  template <class F>
+  transformation<map_step<F>> map(F f);
 
+  /// Calls `on_next` for each item emitted by this observable.
   template <class OnNext>
   disposable for_each(OnNext on_next);
 
+  /// Calls `on_next` for each item and `on_error` for each error emitted by
+  /// this observable.
   template <class OnNext, class OnError>
   disposable for_each(OnNext on_next, OnError on_error);
 
+  /// Calls `on_next` for each item, `on_error` for each error and `on_complete`
+  /// for each completion signal emitted by this observable.
   template <class OnNext, class OnError, class OnComplete>
   disposable for_each(OnNext on_next, OnError on_error, OnComplete on_complete);
 
+  /// Returns a transformation that emits items by merging the outputs of all
+  /// observables returned by `f`.
   template <class F>
   auto flat_map(F f);
 
+  /// Returns a transformation that emits items by concatenating the outputs of
+  /// all observables returned by `f`.
   template <class F>
   auto concat_map(F f);
 
-  /// Asynchronously subscribes observers to the current observable on the
-  /// specified context.
-  template <class Context>
-  observable subscribe_on(Context* context);
-
-  template <class Observer, class = std::enable_if_t<is_observer_v<Observer>>>
-  auto observe_with(Observer hdl) {
-    attach(hdl.as_subscriber());
-    return hdl;
-  }
-
-  /// Convenience function for calling
-  /// `observe_with(make_counted<Impl>(ctor_args...))`.
-  template <class Impl, class... Ts>
-  auto observe_with_new(Ts&&... ctor_args) {
-    auto ptr = make_counted<Impl>(std::forward<Ts>(ctor_args)...);
-    attach(ptr->as_observer());
-    return typename Impl::handle_type{std::move(ptr)};
-  }
-
-  observable observe_on(coordinator* ctx, size_t buffer_size,
+  observable observe_on(coordinator* other, size_t buffer_size,
                         size_t min_request_size);
 
-  observable observe_on(coordinator* ctx) {
-    return observe_on(ctx, defaults::flow::buffer_size,
-                      defaults::flow::batch_size);
+  observable observe_on(coordinator* other) {
+    return observe_on(other, defaults::flow::buffer_size,
+                      defaults::flow::min_demand);
   }
 
   const observable& as_observable() const& noexcept {
@@ -221,8 +213,8 @@ public:
     return lift().concat_map(std::move(f));
   }
 
-  disposable attach(observer<T> what) && {
-    return lift().attach(std::move(what));
+  disposable subscribe(observer<T> what) && {
+    return lift().subscribe(std::move(what));
   }
 
   observable<T> observe_on(coordinator* ctx) && {
@@ -232,12 +224,6 @@ public:
   observable<T> observe_on(coordinator* ctx, size_t buffer_size,
                            size_t min_request_size) && {
     return lift().observe_on(ctx, buffer_size, min_request_size);
-  }
-
-  template <class Impl, class... Ts>
-  auto observe_with_new(Ts&&... args) && {
-    return std::move(*this).as_observable().template observe_with_new<Impl>(
-      std::forward<Ts>(args)...);
   }
 
   virtual observable<T> as_observable() && = 0;
@@ -316,6 +302,181 @@ private:
   intrusive_ptr<impl> pimpl_;
 };
 
+// --
+
+template <class T>
+class observable_error_impl : public observable<T>::impl {
+public:
+  using super = observable_base;
+
+  using output_type = T;
+
+  observable_error_impl(coordinator* ctx, error what)
+    : super(ctx), what_(std::move(what)) {
+    // nop
+  }
+
+  void on_request(observer_base*, size_t) override {
+    CAF_RAISE_ERROR("observable_error_impl::on_request called");
+  }
+
+  void on_cancel(observer_base*) override {
+    CAF_RAISE_ERROR("observable_error_impl::on_cancel called");
+  }
+
+  disposable subscribe(observer<T> what) override {
+    what.on_error(what_);
+  }
+
+  void dispose() override {
+    // nop
+  }
+
+  bool disposed() const noexcept override {
+    return true;
+  }
+
+private:
+  error what_;
+};
+
+// -- lifting bounded buffers to observables -----------------------------------
+
+/// Reads from an observable buffer and emits the consumed items.
+/// @note Only supports a single observer.
+template <class Buffer>
+class observable_buffer_impl
+  : public observable<typename Buffer::value_type>::impl,
+    public async::consumer {
+public:
+  using value_type = typename Buffer::value_type;
+
+  using buffer_ptr = intrusive_ptr<Buffer>;
+
+  using super = typename observable<value_type>::impl;
+
+  observable_buffer_impl(coordinator* ctx, buffer_ptr buf)
+    : super(ctx), buf_(buf) {
+    // Unlike regular observables, we need a strong reference to the context.
+    // Otherwise, the buffer might call schedule_fn on a destroyed object.
+    this->ctx_->ref_coordinator();
+  }
+
+  observable_buffer_impl() {
+    this->ctx_->deref_coordinator();
+  }
+
+  void on_producer_ready() override {
+    // nop
+  }
+
+  void on_producer_wakeup() override {
+    this->ctx_->schedule_fn([ptr{strong_ptr()}] { ptr->pull(); });
+  }
+
+  void on_producer_abort(const error& reason) override {
+    this->ctx_->schedule_fn([ptr{strong_ptr()}, reason] { //
+      ptr->abort(reason);
+    });
+  }
+
+  void ref_consumer() const noexcept override {
+    this->ref();
+  }
+
+  void deref_consumer() const noexcept override {
+    this->deref();
+  }
+
+  void on_request(observer_base*, size_t n) override {
+    demand_ += n;
+    if (demand_ == n)
+      pull();
+  }
+
+  void on_cancel(observer_base*) override {
+    dst_ = nullptr;
+    dispose();
+  }
+
+  disposable subscribe(observer<value_type> what) override {
+    if (buf_ && !dst_) {
+      dst_ = std::move(what);
+      return super::do_subscribe(dst_.ptr());
+    } else {
+      auto err = make_error(sec::cannot_add_upstream,
+                            "observable buffers support only one observer");
+      what.on_error(err);
+      return disposable{};
+    }
+  }
+
+  void dispose() override {
+    if (buf_) {
+      buf_->cancel();
+      buf_ = nullptr;
+      if (dst_) {
+        dst_.on_complete();
+        dst_ = nullptr;
+      }
+    }
+  }
+
+  bool disposed() const noexcept override {
+    return buf_ == nullptr;
+  }
+
+  friend void
+  intrusive_ptr_add_ref(const observable_buffer_impl* ptr) noexcept {
+    ptr->ref();
+  }
+
+  friend void
+  intrusive_ptr_release(const observable_buffer_impl* ptr) noexcept {
+    ptr->deref();
+  }
+
+private:
+  void pull() {
+    if (!buf_ || pulling_ || !dst_ || demand_ == 0)
+      return;
+    pulling_ = true;
+    auto fin = buf_->consume(demand_, [this](span<const value_type> items) {
+      CAF_ASSERT(!items.empty());
+      dst_.on_next(items);
+    });
+    pulling_ = false;
+    if (fin) {
+      buf_ = nullptr;
+      if (dst_) {
+        dst_.on_complete();
+        dst_ = nullptr;
+      }
+    }
+  }
+
+  void abort(const error& what) {
+    if (dst_) {
+      dst_.on_error(what);
+      dst_ = nullptr;
+    }
+    buf_ = nullptr;
+  }
+
+  intrusive_ptr<observable_buffer_impl> strong_ptr() {
+    return {this};
+  }
+
+  buffer_ptr buf_;
+
+  /// Stores a pointer to the target observer running on `remote_ctx_`.
+  observer<value_type> dst_;
+
+  bool pulling_ = false;
+
+  size_t demand_ = 0;
+};
+
 // -- broadcasting -------------------------------------------------------------
 
 /// Base type for processors with a buffer that broadcasts output to all
@@ -362,14 +523,14 @@ public:
     }
   }
 
-  disposable attach(observer<T> sink) override {
+  disposable subscribe(observer<T> sink) override {
     if (done()) {
       sink.on_complete();
       return disposable{};
     } else {
       max_demand_ = 0;
       outputs_.emplace_back(output_t{0u, sink});
-      return super::do_attach(sink.ptr());
+      return super::do_subscribe(sink.ptr());
     }
   }
 
@@ -560,7 +721,7 @@ public:
     this->abort(what);
   }
 
-  void on_attach(subscription sub) override {
+  void on_subscribe(subscription sub) override {
     if (sub_) {
       sub.cancel();
     } else {
@@ -657,7 +818,6 @@ private:
   }
 
   virtual void do_on_next(span<const In> items) = 0;
-
 };
 
 /// Broadcasts its input to all observers without modifying it.
@@ -719,29 +879,29 @@ public:
 
   private:
     void do_on_next(span<const input_type> items) override {
-      auto fn = [this, items](auto& step, auto&... steps) {
+      auto f = [this, items](auto& step, auto&... steps) {
         term_step<output_type> term{this};
         for (auto&& item : items)
           if (!step.on_next(item, steps..., term))
             return;
       };
-      std::apply(fn, steps);
+      std::apply(f, steps);
     }
 
     void do_on_complete() override {
-      auto fn = [this](auto& step, auto&... steps) {
+      auto f = [this](auto& step, auto&... steps) {
         term_step<output_type> term{this};
         step.on_complete(steps..., term);
       };
-      std::apply(fn, steps);
+      std::apply(f, steps);
     }
 
     void do_on_error(const error& what) override {
-      auto fn = [this, &what](auto& step, auto&... steps) {
+      auto f = [this, &what](auto& step, auto&... steps) {
         term_step<output_type> term{this};
         step.on_error(what, steps..., term);
       };
-      std::apply(fn, steps);
+      std::apply(f, steps);
     }
   };
 
@@ -776,32 +936,32 @@ public:
       filter_step<Predicate>{std::move(predicate)});
   }
 
-  template <class Fn>
-  auto map(Fn fn) && {
-    return std::move(*this).transform(map_step<Fn>{std::move(fn)});
+  template <class F>
+  auto map(F f) && {
+    return std::move(*this).transform(map_step<F>{std::move(f)});
   }
 
-  template <class Fn>
-  auto do_on_complete(Fn fn) {
+  template <class F>
+  auto do_on_complete(F f) {
     return std::move(*this) //
-      .transform(on_complete_step<output_type, Fn>{std::move(fn)});
+      .transform(on_complete_step<output_type, F>{std::move(f)});
   }
 
-  template <class Fn>
-  auto do_on_error(Fn fn) {
+  template <class F>
+  auto do_on_error(F f) {
     return std::move(*this) //
-      .transform(on_error_step<output_type, Fn>{std::move(fn)});
+      .transform(on_error_step<output_type, F>{std::move(f)});
   }
 
-  template <class Fn>
-  auto do_finally(Fn fn) {
+  template <class F>
+  auto do_finally(F f) {
     return std::move(*this) //
-      .transform(finally_step<output_type, Fn>{std::move(fn)});
+      .transform(finally_step<output_type, F>{std::move(f)});
   }
 
   observable<output_type> as_observable() && override {
     auto pimpl = make_counted<impl>(source_.ptr()->ctx(), std::move(steps_));
-    source_.attach(observer<input_type>{pimpl});
+    source_.subscribe(observer<input_type>{pimpl});
     return observable<output_type>{std::move(pimpl)};
   }
 
@@ -842,12 +1002,12 @@ observable<T>::filter(Predicate predicate) {
 // -- observable::map ----------------------------------------------------------
 
 template <class T>
-template <class Fn>
-transformation<map_step<Fn>> observable<T>::map(Fn fn) {
-  using step_type = map_step<Fn>;
+template <class F>
+transformation<map_step<F>> observable<T>::map(F f) {
+  using step_type = map_step<F>;
   static_assert(std::is_same_v<typename step_type::input_type, T>,
                 "map function does not match the output type");
-  return {*this, std::forward_as_tuple(step_type{std::move(fn)})};
+  return {*this, std::forward_as_tuple(step_type{std::move(f)})};
 }
 
 // -- observable::for_each -----------------------------------------------------
@@ -856,7 +1016,7 @@ template <class T>
 template <class OnNext>
 disposable observable<T>::for_each(OnNext on_next) {
   auto obs = make_observer(std::move(on_next));
-  attach(obs);
+  subscribe(obs);
   return std::move(obs).as_disposable();
 }
 
@@ -864,7 +1024,7 @@ template <class T>
 template <class OnNext, class OnError>
 disposable observable<T>::for_each(OnNext on_next, OnError on_error) {
   auto obs = make_observer(std::move(on_next), std::move(on_error));
-  attach(obs);
+  subscribe(obs);
   return std::move(obs).as_disposable();
 }
 
@@ -874,7 +1034,7 @@ disposable observable<T>::for_each(OnNext on_next, OnError on_error,
                                    OnComplete on_complete) {
   auto obs = make_observer(std::move(on_next), std::move(on_error),
                            std::move(on_complete));
-  attach(obs);
+  subscribe(obs);
   return std::move(obs).as_disposable();
 }
 
@@ -919,10 +1079,10 @@ public:
       }
     }
 
-    void on_attach(subscription new_sub) override {
+    void on_subscribe(subscription new_sub) override {
       if (!sub) {
         sub = std::move(new_sub);
-        parent->forwarder_attached(this, sub);
+        parent->forwarder_subscribed(this, sub);
       } else {
         new_sub.cancel();
       }
@@ -957,7 +1117,7 @@ public:
 
   disposable add(observable<T> source, intrusive_ptr<forwarder> fwd) {
     forwarders_.emplace_back(fwd);
-    return source.attach(observer<T>{std::move(fwd)});
+    return source.subscribe(observer<T>{std::move(fwd)});
   }
 
   template <class Observable>
@@ -1049,7 +1209,7 @@ private:
     this->try_push();
   }
 
-  void forwarder_attached(forwarder* ptr, subscription& sub) {
+  void forwarder_subscribed(forwarder* ptr, subscription& sub) {
     if (!flags_.concat_mode || (!forwarders_.empty() && forwarders_[0] == ptr))
       sub.request(defaults::flow::buffer_size);
   }
@@ -1079,7 +1239,7 @@ private:
       } else if (flags_.concat_mode) {
         if (auto& sub = forwarders_.front()->sub)
           sub.request(defaults::flow::buffer_size);
-        // else: not attached yet, so forwarder_attached will call sub.request
+        // else: not subscribed yet, so forwarder_subscribed calls sub.request
       }
     }
   }
@@ -1122,7 +1282,7 @@ using merger_impl_ptr = intrusive_ptr<merger_impl<T>>;
 template <class T, class F>
 class flat_map_observer_impl : public observer<T>::impl {
 public:
-  using mapped_type = decltype((std::declval<F&>()) (std::declval<const T&>()));
+  using mapped_type = decltype((std::declval<F&>())(std::declval<const T&>()));
 
   using inner_type = typename mapped_type::output_type;
 
@@ -1161,7 +1321,7 @@ public:
     }
   }
 
-  void on_attach(subscription sub) override {
+  void on_subscribe(subscription sub) override {
     if (!sub_ && merger_) {
       sub_ = std::move(sub);
       sub_.request(10);
@@ -1200,7 +1360,7 @@ auto observable<T>::flat_map(F f) {
                 "mapping functions must return an observable");
   using impl_t = flat_map_observer_impl<T, F>;
   auto obs = make_counted<impl_t>(pimpl_->ctx(), std::move(f));
-  pimpl_->attach(obs->as_observer());
+  pimpl_->subscribe(obs->as_observer());
   return obs->merger();
 }
 
@@ -1215,346 +1375,22 @@ auto observable<T>::concat_map(F f) {
   using impl_t = flat_map_observer_impl<T, F>;
   auto obs = make_counted<impl_t>(pimpl_->ctx(), std::move(f));
   obs->merger_ptr()->concat_mode(true);
-  pimpl_->attach(obs->as_observer());
+  pimpl_->subscribe(obs->as_observer());
   return obs->merger();
-}
-
-// -- observable::subscribe_on -------------------------------------------------
-
-template <class T>
-template <class Context>
-observable<T> observable<T>::subscribe_on(Context* context) {
-  if (pimpl_->ctx() != context) {
-    return context->async_subscribe(*this);
-  } else {
-    return *this;
-  }
 }
 
 // -- observable::observe_on ---------------------------------------------------
 
 template <class T>
-class observe_on_adapter {
-public:
-  class buffer : public ref_counted {
-  public:
-    buffer(uint32_t max_in_flight) : max_in_flight_(max_in_flight) {
-      buf_ = reinterpret_cast<T*>(malloc(sizeof(T) * max_in_flight * 2));
-    }
-
-    ~buffer() {
-      auto first = buf_ + rd_pos_;
-      auto last = buf_ + wr_pos_;
-      std::destroy(first, last);
-      free(buf_);
-    }
-
-    bool push(span<const T> items) {
-      std::unique_lock<std::mutex> guard{mtx_};
-      CAF_ASSERT(!closed_);
-      std::uninitialized_copy(items.begin(), items.end(), buf_ + wr_pos_);
-      wr_pos_ += items.size();
-      return size() == items.size();
-    }
-
-    template <class F>
-    std::pair<bool, size_t> consume(size_t demand, F fn) {
-      std::unique_lock<std::mutex> guard{mtx_};
-      CAF_ASSERT(demand > 0);
-      if (auto n = std::min(demand, size()); n > 0) {
-        auto first = buf_ + rd_pos_;
-        fn(make_span(first, n));
-        std::destroy(first, first + n);
-        rd_pos_ += n;
-        shift_elements();
-        return {false, n};
-      } else {
-        return {closed_, n};
-      }
-    }
-
-    bool close() {
-      std::unique_lock<std::mutex> guard{mtx_};
-      closed_ = true;
-      return !empty();
-    }
-
-    size_t capacity() const noexcept {
-      return max_in_flight_;
-    }
-
-  private:
-    size_t empty() const noexcept {
-      CAF_ASSERT(wr_pos_ >= rd_pos_);
-      return wr_pos_ == rd_pos_;
-    }
-
-    size_t size() const noexcept {
-      CAF_ASSERT(wr_pos_ >= rd_pos_);
-      return wr_pos_ - rd_pos_;
-    }
-
-    void shift_elements() {
-      if (rd_pos_ >= max_in_flight_) {
-        if (empty()) {
-          rd_pos_ = 0;
-          wr_pos_ = 0;
-        } else {
-          // No need to check for overlap: the first half of the buffer is
-          // empty.
-          auto first = buf_ + rd_pos_;
-          auto last = buf_ + wr_pos_;
-          std::uninitialized_move(first, last, buf_);
-          std::destroy(first, last);
-          wr_pos_ -= rd_pos_;
-          rd_pos_ = 0;
-        }
-      }
-    }
-
-    /// Guards access to all other member variables.
-    std::mutex mtx_;
-
-    /// Allocated to max_in_flight_ * 2, but at most holds max_in_flight_
-    /// elements at any point in time. We dynamically shift elements into the
-    /// first half of the buffer whenever rd_pos_ crosses the midpoint.
-    T* buf_;
-
-    /// Stores how many items the buffer may hold at any time.
-    uint32_t max_in_flight_;
-
-    /// Stores the read position of the consumer.
-    uint32_t rd_pos_ = 0;
-
-    /// Stores the write position of the producer.
-    uint32_t wr_pos_ = 0;
-
-    /// Stores whether `close` has been called.
-    bool closed_ = false;
-  };
-
-  using buffer_ptr = intrusive_ptr<buffer>;
-
-  class abstract_upstream : public observer<T>::impl {
-  public:
-    virtual void drop() = 0;
-    virtual void on_request(size_t n) = 0;
-  };
-
-  using upstream_ptr = intrusive_ptr<abstract_upstream>;
-
-  class abstract_downstream : public observable<T>::impl {
-  public:
-    using super = typename observable<T>::impl;
-    using super::super;
-    virtual void pull() = 0;
-    virtual void abort(const error& what) = 0;
-  };
-
-  using downstream_ptr = intrusive_ptr<abstract_downstream>;
-
-  class upstream : public abstract_upstream {
-  public:
-    friend observe_on_adapter;
-
-    upstream(buffer_ptr buf) : buf_(buf) {
-      // nop
-    }
-
-    void on_next(span<const T> items) override {
-      if (downstream_ctx_) {
-        auto wakeup_downstream = buf_->push(items);
-        if (wakeup_downstream)
-          downstream_ctx_->schedule_fn([ptr{downstream_}] { ptr->pull(); });
-      }
-    }
-
-    void on_complete() override {
-      if (downstream_ctx_) {
-        auto wakeup_downstream = buf_->close();
-        if (wakeup_downstream)
-          downstream_ctx_->schedule_fn([ptr{downstream_}] { ptr->pull(); });
-        downstream_ctx_ = nullptr;
-      }
-    }
-
-    void on_error(const error& what) override {
-      if (downstream_ctx_) {
-        downstream_ctx_->schedule_fn([ptr{downstream_}, what] { //
-          ptr->abort(what);
-        });
-        downstream_ctx_ = nullptr;
-      }
-    }
-
-    void on_attach(subscription sub) override {
-      if (downstream_ctx_ && !sub_) {
-        sub_ = std::move(sub);
-        sub_.request(buf_->capacity());
-      } else {
-        sub.cancel();
-      }
-    }
-
-    void on_request(size_t n) override {
-      if (sub_)
-        sub_.request(n);
-    }
-
-    void drop() override {
-      if (sub_) {
-        sub_.cancel();
-        sub_ = nullptr;
-      }
-      downstream_ctx_ = nullptr;
-    }
-
-    void dispose() override {
-      on_complete();
-    }
-
-    bool disposed() const noexcept override {
-      return downstream_ctx_ == nullptr;
-    }
-
-  private:
-    buffer_ptr buf_;
-    coordinator_ptr downstream_ctx_;
-    downstream_ptr downstream_;
-    subscription sub_;
-  };
-
-  class downstream : public abstract_downstream {
-  public:
-    friend observe_on_adapter;
-
-    using super = abstract_downstream;
-
-    downstream(coordinator* ctx, buffer_ptr buf, size_t min_request_size)
-      : super(ctx), buf_(buf), min_request_size_(min_request_size) {
-      // nop
-    }
-
-    void on_request(observer_base*, size_t n) override {
-      demand_ += n;
-      if (demand_ == n)
-        pull();
-    }
-
-    void on_cancel(observer_base*) override {
-      dst_ = nullptr;
-      dispose();
-    }
-
-    disposable attach(observer<T> what) override {
-      if (upstream_ctx_ && !dst_) {
-        dst_ = std::move(what);
-        return super::do_attach(dst_.ptr());
-      } else {
-        auto err = make_error(sec::cannot_add_downstream,
-                              "bridges allow only a single observer");
-        what.on_error(err);
-        return disposable{};
-      }
-    }
-
-    void dispose() override {
-      if (upstream_ctx_) {
-        buf_ = nullptr;
-        upstream_ctx_->schedule_fn([ptr{upstream_}] { ptr->drop(); });
-        upstream_ctx_ = nullptr;
-        upstream_ = nullptr;
-        if (dst_) {
-          dst_.on_complete();
-          dst_ = nullptr;
-        }
-      }
-    }
-
-    bool disposed() const noexcept override {
-      return upstream_ctx_ == nullptr;
-    }
-
-    void pull() override {
-      if (!upstream_ctx_ || pulling_ || !dst_ || demand_ == 0)
-        return;
-      pulling_ = true;
-      auto [fin, n] = buf_->consume(demand_, [this](span<const T> items) {
-        CAF_ASSERT(!items.empty());
-        dst_.on_next(items);
-      });
-      pulling_ = false;
-      if (n > 0) {
-        freed_buffer_space_ += n;
-        if (freed_buffer_space_ > min_request_size_) {
-          auto req_size = freed_buffer_space_
-                          - (freed_buffer_space_ % min_request_size_);
-          freed_buffer_space_ -= req_size;
-          CAF_ASSERT(freed_buffer_space_ < min_request_size_);
-          upstream_ctx_->schedule_fn([ptr{upstream_}, req_size] { //
-            ptr->on_request(req_size);
-          });
-        }
-      } else if (fin)
-        dispose();
-    }
-
-    void abort(const error& what) override {
-      if (dst_) {
-        dst_.on_error(what);
-        dst_ = nullptr;
-      }
-      buf_ = nullptr;
-      upstream_ctx_ = nullptr;
-      upstream_ = nullptr;
-    }
-
-  private:
-    buffer_ptr buf_;
-
-    coordinator_ptr upstream_ctx_;
-
-    upstream_ptr upstream_;
-
-    /// Stores a pointer to the target observer running on `remote_ctx_`.
-    observer<T> dst_;
-
-    bool pulling_ = false;
-
-    size_t demand_ = 0;
-
-    size_t min_request_size_;
-
-    size_t freed_buffer_space_ = 0;
-  };
-
-  static std::pair<upstream_ptr, downstream_ptr>
-  make(coordinator* up_ctx, coordinator* down_ctx, size_t buffer_size,
-       size_t min_request_size) {
-    CAF_ASSERT(buffer_size > min_request_size);
-    auto buf = make_counted<buffer>(buffer_size);
-    auto up = make_counted<upstream>(buf);
-    auto down = make_counted<downstream>(down_ctx, buf, min_request_size);
-    up->downstream_ctx_.reset(down_ctx);
-    up->downstream_ = down;
-    down->upstream_ctx_.reset(up_ctx);
-    down->upstream_ = up;
-    return {up, down};
-  }
-
-  static std::pair<upstream_ptr, downstream_ptr> make(coordinator* up_ctx,
-                                                      coordinator* down_ctx) {
-    return make(up_ctx, down_ctx, defaults::flow::buffer_size,
-                defaults::flow::batch_size);
-  }
-};
-
-template <class T>
-observable<T> observable<T>::observe_on(coordinator* ctx, size_t buffer_size,
+observable<T> observable<T>::observe_on(coordinator* other, size_t buffer_size,
                                         size_t min_request_size) {
-  auto [up, down] = observe_on_adapter<T>::make(pimpl_->ctx(), ctx, buffer_size,
-                                                min_request_size);
-  attach(up->as_observer());
+  using buffer = async::bounded_buffer<T>;
+  auto buf = make_counted<buffer>(buffer_size, min_request_size);
+  auto up = make_counted<buffer_writer_impl<buffer>>(pimpl_->ctx(), buf);
+  auto down = make_counted<observable_buffer_impl<buffer>>(other, buf);
+  buf->set_producer(up);
+  buf->set_consumer(down);
+  subscribe(up->as_observer());
   return down->as_observable();
 }
 

@@ -18,7 +18,7 @@ public:
   ~observer_base() override;
   virtual void on_complete() = 0;
   virtual void on_error(const error& what) = 0;
-  virtual void on_attach(subscription sub) = 0;
+  virtual void on_subscribe(subscription sub) = 0;
   virtual void on_batch(const async::batch& buf) = 0;
 };
 

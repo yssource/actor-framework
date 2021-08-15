@@ -494,43 +494,6 @@ public:
 
   // -- caf::flow API ----------------------------------------------------------
 
-  /// Observes items from `source` on this actor.
-  /// @note Include `caf/scheduled_actor/flow.hpp` for this member function.
-  template <class T>
-  flow::observable<T> observe(async::publisher<T> source) {
-    static_assert(flow::has_impl_include_v<detail::left_t<scheduled_actor, T>>,
-                  "include 'caf/scheduled_actor/flow.hpp' for this method");
-    return observe_impl(std::move(source));
-  }
-
-  /// Makes items from `source` visible outside of this actor by wrapping it
-  /// into an @ref async::publisher.
-  /// @note Include `caf/scheduled_actor/flow.hpp` for this member function.
-  template <class Observable>
-  async::publisher<typename Observable::output_type>
-  to_async_publisher(Observable source) {
-    using T = typename Observable::output_type;
-    static_assert(flow::has_impl_include_v<detail::left_t<scheduled_actor, T>>,
-                  "include 'caf/scheduled_actor/flow.hpp' for this method");
-    return to_async_publisher_impl(std::move(source));
-  }
-
-  /// Observes items from `source` on this actor.
-  /// @note Include `caf/scheduled_actor/flow.hpp` for this member function.
-  template <class T>
-  flow::observable<T> async_subscribe(flow::observable<T> source) {
-    static_assert(flow::has_impl_include_v<detail::left_t<scheduled_actor, T>>,
-                  "include 'caf/scheduled_actor/flow.hpp' for this method");
-    return async_subscribe_impl(std::move(source));
-  }
-
-  /// Creates an @ref async::notifiable that other parts of the system may
-  /// call asynchronously for triggering events on the `listener`.
-  async::notifiable
-  to_async_notifiable(async::notifiable::listener_ptr listener);
-
-  flow::subscription to_async_subscription(flow::subscription sub);
-
   void ref_coordinator() const noexcept override;
 
   void deref_coordinator() const noexcept override;
@@ -804,16 +767,6 @@ private:
 
   template <class T, class Policy>
   flow::single<T> single_from_response_impl(Policy& policy);
-
-  template <class T>
-  flow::observable<T> observe_impl(async::publisher<T> source);
-
-  template <class T>
-  flow::observable<T> async_subscribe_impl(flow::observable<T> source);
-
-  template <class Observable>
-  async::publisher<typename Observable::output_type>
-  to_async_publisher_impl(Observable source);
 
   struct flow_event {
     enum type_t { request, cancel };

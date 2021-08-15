@@ -14,10 +14,10 @@ observable_base::~observable_base() {
   // nop
 }
 
-disposable observable_base::do_attach(observer_base* snk) {
+disposable observable_base::do_subscribe(observer_base* snk) {
   using impl = coordinator::subscription_impl;
   auto ptr = make_counted<impl>(ctx_, this, snk);
-  snk->on_attach(subscription{ptr});
+  snk->on_subscribe(subscription{ptr});
   return disposable{std::move(ptr)};
 }
 

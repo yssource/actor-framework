@@ -8,17 +8,26 @@
 
 namespace caf::async {
 
+// -- classes ------------------------------------------------------------------
+
 class batch;
+class consumer;
+class producer;
+
+// -- template classes ---------------------------------------------------------
+
+template <class T>
+class bounded_buffer;
+
+template <class T>
+class consumer_resource;
+
+template <class T>
+class producer_resource;
+
+// -- free function templates --------------------------------------------------
 
 template <class T>
 batch make_batch(span<const T> items);
-
-class notifiable;
-
-template <class T>
-class publisher;
-
-template <class T>
-class blocking_publisher;
 
 } // namespace caf::async

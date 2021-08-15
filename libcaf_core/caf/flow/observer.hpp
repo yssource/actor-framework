@@ -5,10 +5,12 @@
 #pragma once
 
 #include "caf/async/batch.hpp"
+#include "caf/async/producer.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/disposable.hpp"
 #include "caf/error.hpp"
+#include "caf/flow/coordinator.hpp"
 #include "caf/flow/observer_base.hpp"
 #include "caf/flow/subscription.hpp"
 #include "caf/intrusive_ptr.hpp"
@@ -76,8 +78,8 @@ public:
   }
 
   /// @pre `valid()`
-  void on_attach(subscription sub) {
-    pimpl_->on_attach(std::move(sub));
+  void on_subscribe(subscription sub) {
+    pimpl_->on_subscribe(std::move(sub));
   }
 
   /// @pre `valid()`
@@ -131,6 +133,112 @@ public:
 
 private:
   intrusive_ptr<impl> pimpl_;
+};
+
+// -- writing observed values to a buffer --------------------------------------
+
+/// Writes observed values to a bounded buffer.
+template <class Buffer>
+class buffer_writer_impl : public observer<typename Buffer::value_type>::impl,
+                           public async::producer {
+public:
+  using buffer_ptr = intrusive_ptr<Buffer>;
+
+  using value_type = typename Buffer::value_type;
+
+  buffer_writer_impl(coordinator* ctx, buffer_ptr buf) : ctx_(ctx), buf_(buf) {
+    // nop
+  }
+
+  void on_consumer_ready() override {
+    // nop
+  }
+
+  void on_consumer_cancel() override {
+    ctx_->schedule_fn([ptr{strong_ptr()}] { ptr->on_cancel(); });
+  }
+
+  void on_consumer_demand(size_t demand) override {
+    ctx_->schedule_fn([ptr{strong_ptr()}, demand] { //
+      ptr->on_demand(demand);
+    });
+  }
+
+  void ref_producer() const noexcept override {
+    this->ref();
+  }
+
+  void deref_producer() const noexcept override {
+    this->deref();
+  }
+
+  void on_next(span<const value_type> items) override {
+    if (buf_)
+      buf_->push(items);
+  }
+
+  void on_complete() override {
+    if (buf_) {
+      buf_->close();
+      buf_ = nullptr;
+      sub_ = nullptr;
+    }
+  }
+
+  void on_error(const error& what) override {
+    if (buf_) {
+      buf_->abort(what);
+      buf_ = nullptr;
+      sub_ = nullptr;
+    }
+  }
+
+  void on_subscribe(subscription sub) override {
+    if (buf_ && !sub_) {
+      sub_ = std::move(sub);
+      sub_.request(buf_->capacity());
+    } else {
+      sub.cancel();
+    }
+  }
+
+  void dispose() override {
+    on_complete();
+  }
+
+  bool disposed() const noexcept override {
+    return buf_ == nullptr;
+  }
+
+  friend void intrusive_ptr_add_ref(const buffer_writer_impl* ptr) noexcept {
+    ptr->ref();
+  }
+
+  friend void intrusive_ptr_release(const buffer_writer_impl* ptr) noexcept {
+    ptr->deref();
+  }
+
+private:
+  void on_demand(size_t n) {
+    if (sub_)
+      sub_.request(n);
+  }
+
+  void on_cancel() {
+    if (sub_) {
+      sub_.cancel();
+      sub_ = nullptr;
+    }
+    buf_ = nullptr;
+  }
+
+  intrusive_ptr<buffer_writer_impl> strong_ptr() {
+    return {this};
+  }
+
+  coordinator_ptr ctx_;
+  buffer_ptr buf_;
+  subscription sub_;
 };
 
 } // namespace caf::flow
@@ -230,7 +338,7 @@ public:
     }
   }
 
-  void on_attach(flow::subscription sub) override {
+  void on_subscribe(flow::subscription sub) override {
     if (!completed_ && !sub_) {
       sub_ = std::move(sub);
       sub_.request(defaults::flow::buffer_size);

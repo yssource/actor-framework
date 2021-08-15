@@ -32,9 +32,9 @@ public:
       // nop
     }
 
-    disposable attach(observer<T> what) override {
+    disposable subscribe(observer<T> what) override {
       if (!std::holds_alternative<error>(value_)) {
-        auto res = super::do_attach(what.ptr());
+        auto res = super::do_subscribe(what.ptr());
         observers_.emplace_back(std::move(what), 0u);
         return res;
       } else {
@@ -138,15 +138,15 @@ public:
     return observable<T>{pimpl_};
   }
 
-  void attach(observer<T> what) {
+  void subscribe(observer<T> what) {
     if (pimpl_)
-      pimpl_->attach(std::move(what));
+      pimpl_->subscribe(std::move(what));
     else
       what.on_error(make_error(sec::invalid_observable));
   }
 
   template <class OnSuccess, class OnError>
-  void attach(OnSuccess on_success, OnError on_error) {
+  void subscribe(OnSuccess on_success, OnError on_error) {
     static_assert(std::is_invocable_v<OnSuccess, const T&>);
     as_observable().for_each(
       [f{std::move(on_success)}](span<const T> items) mutable {

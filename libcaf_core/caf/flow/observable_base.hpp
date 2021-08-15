@@ -32,7 +32,7 @@ public:
   }
 
 protected:
-  disposable do_attach(observer_base* sink);
+  disposable do_subscribe(observer_base* sink);
 
   coordinator* ctx_;
 };

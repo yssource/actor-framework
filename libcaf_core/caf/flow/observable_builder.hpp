@@ -113,6 +113,10 @@ public:
   template <class F>
   [[nodiscard]] generation<callable_source<F>> from_callable(F fn) const;
 
+  template <class BufferedResource>
+  [[nodiscard]] observable<typename BufferedResource::value_type>
+  from_resource(BufferedResource hdl) const;
+
   template <class Pullable>
   [[nodiscard]] generation<Pullable> lift(Pullable pullable) const;
 
@@ -232,6 +236,24 @@ auto observable_builder::just(T value) const {
 template <class F>
 generation<callable_source<F>> observable_builder::from_callable(F fn) const {
   return {ctx_, callable_source<F>{std::move(fn)}};
+}
+
+// -- observable_builder::from_resource ----------------------------------------
+
+template <class BufferedResource>
+observable<typename BufferedResource::value_type>
+observable_builder::from_resource(BufferedResource hdl) const {
+  using value_type = typename BufferedResource::value_type;
+  if (auto buf = hdl.open()) {
+    auto adapter = make_counted<observable_buffer_impl<value_type>>(ctx_, buf);
+    buf->set_consumer(adapter);
+    return {std::move(adapter)};
+  } else {
+    using impl_t = observable_error_impl<value_type>;
+    auto err = make_error(sec::invalid_observable,
+                          "from_resource: failed to open the resource");
+    return {make_counted<impl_t>(ctx_, std::move(err))};
+  }
 }
 
 // -- observable_builder::lift -------------------------------------------------

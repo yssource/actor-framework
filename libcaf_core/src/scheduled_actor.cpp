@@ -11,9 +11,7 @@
 #include "caf/detail/default_invoke_result_visitor.hpp"
 #include "caf/detail/meta_object.hpp"
 #include "caf/detail/private_thread.hpp"
-#include "caf/detail/subscription_decorator.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
-#include "caf/detail/unsafe_flow_msg.hpp"
 #include "caf/inbound_path.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
 
@@ -606,73 +604,6 @@ uint64_t scheduled_actor::set_stream_timeout(actor_clock::time_point x) {
 
 // -- caf::flow API ------------------------------------------------------------
 
-} // namespace caf
-
-namespace caf::detail {
-
-class notifiable_impl : public async::notifiable::impl {
-public:
-  notifiable_impl(scheduled_actor* self, async::notifiable::listener_ptr ptr)
-    : hdl_(self->ctrl(), true), ptr_(std::move(ptr)) {
-    // nop
-  }
-
-  ~notifiable_impl() {
-    if (hdl_)
-      hdl_->eq_impl(make_message_id(), nullptr, nullptr,
-                    unsafe_flow_msg{close_atom_v, ptr_});
-  }
-
-  void notify_event() override {
-    if (hdl_)
-      hdl_->eq_impl(make_message_id(), nullptr, nullptr, unsafe_flow_msg{ptr_});
-  }
-
-  void notify_close() override {
-    if (hdl_) {
-      hdl_->eq_impl(make_message_id(), nullptr, nullptr,
-                    unsafe_flow_msg{close_atom_v, ptr_});
-      reset();
-    }
-  }
-
-  void notify_abort(const error& reason) override {
-    if (hdl_) {
-      hdl_->eq_impl(make_message_id(), nullptr, nullptr,
-                    unsafe_flow_msg{ptr_, reason});
-      reset();
-    }
-  }
-
-  void reset() {
-    hdl_ = nullptr;
-    ptr_ = nullptr;
-  }
-
-private:
-  actor hdl_;
-  async::notifiable::listener_ptr ptr_;
-};
-
-} // namespace caf::detail
-
-namespace caf {
-
-async::notifiable
-scheduled_actor::to_async_notifiable(async::notifiable::listener_ptr listener) {
-  auto ptr = make_counted<detail::notifiable_impl>(this, std::move(listener));
-  return async::notifiable{std::move(ptr)};
-}
-
-flow::subscription
-scheduled_actor::to_async_subscription(flow::subscription sub) {
-  using decorator = detail::subscription_decorator;
-  auto strong_ptr = strong_actor_ptr{ctrl()};
-  auto hdl = actor_cast<actor>(std::move(strong_ptr));
-  auto wrapped = make_counted<decorator>(std::move(hdl), std::move(sub));
-  return flow::subscription{std::move(wrapped)};
-}
-
 void scheduled_actor::ref_coordinator() const noexcept {
   intrusive_ptr_add_ref(ctrl());
 }
@@ -682,8 +613,7 @@ void scheduled_actor::deref_coordinator() const noexcept {
 }
 
 void scheduled_actor::schedule(flow::coordinator::action_ptr action) {
-  enqueue(nullptr, make_message_id(),
-          make_message(detail::unsafe_flow_msg{std::move(action)}), nullptr);
+  enqueue(nullptr, make_message_id(), make_message(std::move(action)), nullptr);
 }
 
 // -- message processing -------------------------------------------------------
@@ -721,8 +651,8 @@ scheduled_actor::categorize(mailbox_element& x) {
     }
     return message_category::internal;
   }
-  if (auto view = make_typed_message_view<detail::unsafe_flow_msg>(content)) {
-    get<0>(view).exec();
+  if (auto view = make_typed_message_view<shared_action_ptr>(content)) {
+    (*get<0>(view))();
     handle_flow_events();
     return message_category::internal;
   }

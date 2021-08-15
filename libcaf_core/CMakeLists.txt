@@ -81,7 +81,9 @@ caf_add_component(
     src/actor_system.cpp
     src/actor_system_config.cpp
     src/async/batch.cpp
+    src/async/consumer.cpp
     src/async/notifiable.cpp
+    src/async/producer.cpp
     src/attachable.cpp
     src/behavior.cpp
     src/binary_deserializer.cpp
@@ -131,14 +133,12 @@ caf_add_component(
     src/detail/simple_actor_clock.cpp
     src/detail/size_based_credit_controller.cpp
     src/detail/stringification_inspector.cpp
-    src/detail/subscription_decorator.cpp
     src/detail/sync_request_bouncer.cpp
     src/detail/test_actor_clock.cpp
     src/detail/thread_safe_actor_clock.cpp
     src/detail/tick_emitter.cpp
     src/detail/token_based_credit_controller.cpp
     src/detail/type_id_list_builder.cpp
-    src/detail/unsafe_flow_msg.cpp
     src/disposable.cpp
     src/downstream_manager.cpp
     src/downstream_manager_base.cpp
@@ -208,12 +208,12 @@ caf_add_component(
     src/string_algorithms.cpp
     src/string_view.cpp
     src/telemetry/collector/prometheus.cpp
+    src/telemetry/importer/process.cpp
     src/telemetry/label.cpp
     src/telemetry/label_view.cpp
     src/telemetry/metric.cpp
     src/telemetry/metric_family.cpp
     src/telemetry/metric_registry.cpp
-    src/telemetry/importer/process.cpp
     src/term.cpp
     src/thread_hook.cpp
     src/timestamp.cpp
@@ -237,8 +237,7 @@ caf_add_component(
     actor_system_config
     actor_termination
     aout
-    async.blocking_for_each
-    async.publishing_queue
+    # async.blocking_for_each
     behavior
     binary_deserializer
     binary_serializer

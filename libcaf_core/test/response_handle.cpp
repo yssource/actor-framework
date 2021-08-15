@@ -64,8 +64,8 @@ SCENARIO("response handles are convertible to observables and singles") {
         with_actor([this, &result](event_based_actor* self) {
           self->request(dummy, infinite, int32_t{42})
             .as_single<int32_t>()
-            .attach([&result](int32_t val) { result = val; },
-                    [&result](const error& what) { result = what; });
+            .subscribe([&result](int32_t val) { result = val; },
+                       [&result](const error& what) { result = what; });
         });
         expect((int32_t), from(aut).to(dummy).with(42));
         expect((int32_t), from(dummy).to(aut).with(84));
@@ -107,8 +107,8 @@ SCENARIO("response handles are convertible to observables and singles") {
         with_actor([this, &result](event_based_actor* self) {
           self->request(dummy, infinite, int32_t{13})
             .as_single<int32_t>()
-            .attach([&result](int32_t val) { result = val; },
-                    [&result](const error& what) { result = what; });
+            .subscribe([&result](int32_t val) { result = val; },
+                       [&result](const error& what) { result = what; });
         });
         expect((int32_t), from(aut).to(dummy).with(13));
         expect((error), from(dummy).to(aut));
