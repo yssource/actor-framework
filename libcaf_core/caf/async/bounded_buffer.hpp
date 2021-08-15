@@ -10,6 +10,7 @@
 #include "caf/async/consumer.hpp"
 #include "caf/async/producer.hpp"
 #include "caf/config.hpp"
+#include "caf/defaults.hpp"
 #include "caf/error.hpp"
 #include "caf/intrusive_ptr.hpp"
 #include "caf/make_counted.hpp"
@@ -235,6 +236,7 @@ struct resource_ctrl : ref_counted {
       res.swap(buf);
       return res;
     }
+    return nullptr;
   }
 
   std::mutex mtx;
@@ -254,7 +256,7 @@ public:
 
   using buffer_ptr = bounded_buffer_ptr<T>;
 
-  consumer_resource(buffer_ptr buf) {
+  explicit consumer_resource(buffer_ptr buf) {
     ctrl_.emplace(std::move(buf));
   }
 
@@ -290,7 +292,7 @@ public:
 
   using buffer_ptr = bounded_buffer_ptr<T>;
 
-  producer_resource(buffer_ptr buf) {
+  explicit producer_resource(buffer_ptr buf) {
     ctrl_.emplace(std::move(buf));
   }
 
@@ -313,5 +315,22 @@ public:
 private:
   intrusive_ptr<resource_ctrl<T, true>> ctrl_;
 };
+
+/// Creates bounded buffer and returns two resources connected by that buffer.
+template <class T>
+std::pair<consumer_resource<T>, producer_resource<T>>
+make_bounded_buffer_resource(size_t buffer_size, size_t min_request_size) {
+  using buffer_type = bounded_buffer<T>;
+  auto buf = make_counted<buffer_type>(buffer_size, min_request_size);
+  return {async::consumer_resource<T>{buf}, async::producer_resource<T>{buf}};
+}
+
+/// Creates bounded buffer and returns two resources connected by that buffer.
+template <class T>
+std::pair<consumer_resource<T>, producer_resource<T>>
+make_bounded_buffer_resource() {
+  return make_bounded_buffer_resource<T>(defaults::flow::buffer_size,
+                                         defaults::flow::min_demand);
+}
 
 } // namespace caf::async

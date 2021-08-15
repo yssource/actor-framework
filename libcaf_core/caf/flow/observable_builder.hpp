@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "caf/async/bounded_buffer.hpp"
 #include "caf/defaults.hpp"
 #include "caf/flow/coordinator.hpp"
 #include "caf/flow/observable.hpp"
@@ -113,9 +114,11 @@ public:
   template <class F>
   [[nodiscard]] generation<callable_source<F>> from_callable(F fn) const;
 
-  template <class BufferedResource>
-  [[nodiscard]] observable<typename BufferedResource::value_type>
-  from_resource(BufferedResource hdl) const;
+  /// Opens an asynchronous, buffered resource and emits all inputs from the
+  /// buffer.
+  template <class T>
+  [[nodiscard]] observable<T>
+  from_resource(async::consumer_resource<T> hdl) const;
 
   template <class Pullable>
   [[nodiscard]] generation<Pullable> lift(Pullable pullable) const;
@@ -240,19 +243,19 @@ generation<callable_source<F>> observable_builder::from_callable(F fn) const {
 
 // -- observable_builder::from_resource ----------------------------------------
 
-template <class BufferedResource>
-observable<typename BufferedResource::value_type>
-observable_builder::from_resource(BufferedResource hdl) const {
-  using value_type = typename BufferedResource::value_type;
+template <class T>
+observable<T>
+observable_builder::from_resource(async::consumer_resource<T> hdl) const {
+  using buffer_type = typename async::consumer_resource<T>::buffer_type;
+  using res_t = observable<T>;
   if (auto buf = hdl.open()) {
-    auto adapter = make_counted<observable_buffer_impl<value_type>>(ctx_, buf);
+    auto adapter = make_counted<observable_buffer_impl<buffer_type>>(ctx_, buf);
     buf->set_consumer(adapter);
-    return {std::move(adapter)};
+    return res_t{std::move(adapter)};
   } else {
-    using impl_t = observable_error_impl<value_type>;
     auto err = make_error(sec::invalid_observable,
                           "from_resource: failed to open the resource");
-    return {make_counted<impl_t>(ctx_, std::move(err))};
+    return res_t{make_counted<observable_error_impl<T>>(ctx_, std::move(err))};
   }
 }
 

@@ -88,6 +88,9 @@ public:
     }
   }
 
+  /// Creates a new observer that pushes all observed items to the resource.
+  disposable subscribe(async::producer_resource<T> resource);
+
   /// Returns a transformation that applies a step function to each input.
   template <class Step>
   transformation<Step> transform(Step step);
@@ -127,6 +130,15 @@ public:
   /// all observables returned by `f`.
   template <class F>
   auto concat_map(F f);
+
+  /// Creates an asynchronous resource that makes emitted items available in a
+  /// bounded buffer.
+  async::consumer_resource<T> to_resource(size_t buffer_size,
+                                          size_t min_request_size);
+
+  async::consumer_resource<T> to_resource() {
+    return to_resource(defaults::flow::buffer_size, defaults::flow::min_demand);
+  }
 
   observable observe_on(coordinator* other, size_t buffer_size,
                         size_t min_request_size);
@@ -217,13 +229,26 @@ public:
     return lift().subscribe(std::move(what));
   }
 
-  observable<T> observe_on(coordinator* ctx) && {
-    return lift().observe_on(ctx);
+  disposable subscribe(async::producer_resource<T> resource) && {
+    return lift().subscribe(std::move(resource));
   }
 
-  observable<T> observe_on(coordinator* ctx, size_t buffer_size,
+  async::consumer_resource<T> to_resource() && {
+    return lift().to_resource();
+  }
+
+  async::consumer_resource<T> to_resource(size_t buffer_size,
+                                          size_t min_request_size) && {
+    return lift().to_resource(buffer_size, min_request_size);
+  }
+
+  observable<T> observe_on(coordinator* other) && {
+    return lift().observe_on(other);
+  }
+
+  observable<T> observe_on(coordinator* other, size_t buffer_size,
                            size_t min_request_size) && {
-    return lift().observe_on(ctx, buffer_size, min_request_size);
+    return lift().observe_on(other, buffer_size, min_request_size);
   }
 
   virtual observable<T> as_observable() && = 0;
@@ -302,12 +327,12 @@ private:
   intrusive_ptr<impl> pimpl_;
 };
 
-// --
+// -- representing an error as an observable -----------------------------------
 
 template <class T>
 class observable_error_impl : public observable<T>::impl {
 public:
-  using super = observable_base;
+  using super = typename observable<T>::impl;
 
   using output_type = T;
 
@@ -326,6 +351,7 @@ public:
 
   disposable subscribe(observer<T> what) override {
     what.on_error(what_);
+    return {};
   }
 
   void dispose() override {
@@ -338,143 +364,6 @@ public:
 
 private:
   error what_;
-};
-
-// -- lifting bounded buffers to observables -----------------------------------
-
-/// Reads from an observable buffer and emits the consumed items.
-/// @note Only supports a single observer.
-template <class Buffer>
-class observable_buffer_impl
-  : public observable<typename Buffer::value_type>::impl,
-    public async::consumer {
-public:
-  using value_type = typename Buffer::value_type;
-
-  using buffer_ptr = intrusive_ptr<Buffer>;
-
-  using super = typename observable<value_type>::impl;
-
-  observable_buffer_impl(coordinator* ctx, buffer_ptr buf)
-    : super(ctx), buf_(buf) {
-    // Unlike regular observables, we need a strong reference to the context.
-    // Otherwise, the buffer might call schedule_fn on a destroyed object.
-    this->ctx_->ref_coordinator();
-  }
-
-  observable_buffer_impl() {
-    this->ctx_->deref_coordinator();
-  }
-
-  void on_producer_ready() override {
-    // nop
-  }
-
-  void on_producer_wakeup() override {
-    this->ctx_->schedule_fn([ptr{strong_ptr()}] { ptr->pull(); });
-  }
-
-  void on_producer_abort(const error& reason) override {
-    this->ctx_->schedule_fn([ptr{strong_ptr()}, reason] { //
-      ptr->abort(reason);
-    });
-  }
-
-  void ref_consumer() const noexcept override {
-    this->ref();
-  }
-
-  void deref_consumer() const noexcept override {
-    this->deref();
-  }
-
-  void on_request(observer_base*, size_t n) override {
-    demand_ += n;
-    if (demand_ == n)
-      pull();
-  }
-
-  void on_cancel(observer_base*) override {
-    dst_ = nullptr;
-    dispose();
-  }
-
-  disposable subscribe(observer<value_type> what) override {
-    if (buf_ && !dst_) {
-      dst_ = std::move(what);
-      return super::do_subscribe(dst_.ptr());
-    } else {
-      auto err = make_error(sec::cannot_add_upstream,
-                            "observable buffers support only one observer");
-      what.on_error(err);
-      return disposable{};
-    }
-  }
-
-  void dispose() override {
-    if (buf_) {
-      buf_->cancel();
-      buf_ = nullptr;
-      if (dst_) {
-        dst_.on_complete();
-        dst_ = nullptr;
-      }
-    }
-  }
-
-  bool disposed() const noexcept override {
-    return buf_ == nullptr;
-  }
-
-  friend void
-  intrusive_ptr_add_ref(const observable_buffer_impl* ptr) noexcept {
-    ptr->ref();
-  }
-
-  friend void
-  intrusive_ptr_release(const observable_buffer_impl* ptr) noexcept {
-    ptr->deref();
-  }
-
-private:
-  void pull() {
-    if (!buf_ || pulling_ || !dst_ || demand_ == 0)
-      return;
-    pulling_ = true;
-    auto fin = buf_->consume(demand_, [this](span<const value_type> items) {
-      CAF_ASSERT(!items.empty());
-      dst_.on_next(items);
-    });
-    pulling_ = false;
-    if (fin) {
-      buf_ = nullptr;
-      if (dst_) {
-        dst_.on_complete();
-        dst_ = nullptr;
-      }
-    }
-  }
-
-  void abort(const error& what) {
-    if (dst_) {
-      dst_.on_error(what);
-      dst_ = nullptr;
-    }
-    buf_ = nullptr;
-  }
-
-  intrusive_ptr<observable_buffer_impl> strong_ptr() {
-    return {this};
-  }
-
-  buffer_ptr buf_;
-
-  /// Stores a pointer to the target observer running on `remote_ctx_`.
-  observer<value_type> dst_;
-
-  bool pulling_ = false;
-
-  size_t demand_ = 0;
 };
 
 // -- broadcasting -------------------------------------------------------------
@@ -1379,19 +1268,182 @@ auto observable<T>::concat_map(F f) {
   return obs->merger();
 }
 
+// -- observable::to_resource --------------------------------------------------
+
+/// Reads from an observable buffer and emits the consumed items.
+/// @note Only supports a single observer.
+template <class Buffer>
+class observable_buffer_impl
+  : public observable<typename Buffer::value_type>::impl,
+    public async::consumer {
+public:
+  using value_type = typename Buffer::value_type;
+
+  using buffer_ptr = intrusive_ptr<Buffer>;
+
+  using super = typename observable<value_type>::impl;
+
+  observable_buffer_impl(coordinator* ctx, buffer_ptr buf)
+    : super(ctx), buf_(buf) {
+    // Unlike regular observables, we need a strong reference to the context.
+    // Otherwise, the buffer might call schedule_fn on a destroyed object.
+    this->ctx_->ref_coordinator();
+  }
+
+  observable_buffer_impl() {
+    this->ctx_->deref_coordinator();
+  }
+
+  void on_producer_ready() override {
+    // nop
+  }
+
+  void on_producer_wakeup() override {
+    this->ctx_->schedule_fn([ptr{strong_ptr()}] { ptr->pull(); });
+  }
+
+  void on_producer_abort(const error& reason) override {
+    this->ctx_->schedule_fn([ptr{strong_ptr()}, reason] { //
+      ptr->abort(reason);
+    });
+  }
+
+  void ref_consumer() const noexcept override {
+    this->ref();
+  }
+
+  void deref_consumer() const noexcept override {
+    this->deref();
+  }
+
+  void on_request(observer_base*, size_t n) override {
+    demand_ += n;
+    if (demand_ == n)
+      pull();
+  }
+
+  void on_cancel(observer_base*) override {
+    dst_ = nullptr;
+    dispose();
+  }
+
+  disposable subscribe(observer<value_type> what) override {
+    if (buf_ && !dst_) {
+      dst_ = std::move(what);
+      return super::do_subscribe(dst_.ptr());
+    } else {
+      auto err = make_error(sec::cannot_add_upstream,
+                            "observable buffers support only one observer");
+      what.on_error(err);
+      return disposable{};
+    }
+  }
+
+  void dispose() override {
+    if (buf_) {
+      buf_->cancel();
+      buf_ = nullptr;
+      if (dst_) {
+        dst_.on_complete();
+        dst_ = nullptr;
+      }
+    }
+  }
+
+  bool disposed() const noexcept override {
+    return buf_ == nullptr;
+  }
+
+  friend void
+  intrusive_ptr_add_ref(const observable_buffer_impl* ptr) noexcept {
+    ptr->ref();
+  }
+
+  friend void
+  intrusive_ptr_release(const observable_buffer_impl* ptr) noexcept {
+    ptr->deref();
+  }
+
+private:
+  void pull() {
+    if (!buf_ || pulling_ || !dst_ || demand_ == 0)
+      return;
+    pulling_ = true;
+    auto fin = buf_->consume(demand_, [this](span<const value_type> items) {
+      CAF_ASSERT(!items.empty());
+      dst_.on_next(items);
+    });
+    pulling_ = false;
+    if (fin) {
+      buf_ = nullptr;
+      if (dst_) {
+        dst_.on_complete();
+        dst_ = nullptr;
+      }
+    }
+  }
+
+  void abort(const error& what) {
+    if (dst_) {
+      dst_.on_error(what);
+      dst_ = nullptr;
+    }
+    buf_ = nullptr;
+  }
+
+  intrusive_ptr<observable_buffer_impl> strong_ptr() {
+    return {this};
+  }
+
+  buffer_ptr buf_;
+
+  /// Stores a pointer to the target observer running on `remote_ctx_`.
+  observer<value_type> dst_;
+
+  bool pulling_ = false;
+
+  size_t demand_ = 0;
+};
+
+template <class T>
+async::consumer_resource<T>
+observable<T>::to_resource(size_t buffer_size, size_t min_request_size) {
+  using buffer_type = async::bounded_buffer<T>;
+  auto buf = make_counted<buffer_type>(buffer_size, min_request_size);
+  auto up = make_counted<buffer_writer_impl<buffer_type>>(pimpl_->ctx(), buf);
+  buf->set_producer(up);
+  subscribe(up->as_observer());
+  return async::consumer_resource<T>{std::move(buf)};
+}
+
 // -- observable::observe_on ---------------------------------------------------
 
 template <class T>
 observable<T> observable<T>::observe_on(coordinator* other, size_t buffer_size,
                                         size_t min_request_size) {
-  using buffer = async::bounded_buffer<T>;
-  auto buf = make_counted<buffer>(buffer_size, min_request_size);
-  auto up = make_counted<buffer_writer_impl<buffer>>(pimpl_->ctx(), buf);
-  auto down = make_counted<observable_buffer_impl<buffer>>(other, buf);
+  using buffer_type = async::bounded_buffer<T>;
+  auto buf = make_counted<buffer_type>(buffer_size, min_request_size);
+  auto up = make_counted<buffer_writer_impl<buffer_type>>(pimpl_->ctx(), buf);
+  auto down = make_counted<observable_buffer_impl<buffer_type>>(other, buf);
   buf->set_producer(up);
   buf->set_consumer(down);
   subscribe(up->as_observer());
   return down->as_observable();
+}
+
+// -- observable::subscribe ----------------------------------------------------
+
+template <class T>
+disposable observable<T>::subscribe(async::producer_resource<T> resource) {
+  using buffer_type = typename async::consumer_resource<T>::buffer_type;
+  using adapter_type = buffer_writer_impl<buffer_type>;
+  if (auto buf = resource.open()) {
+    auto adapter = make_counted<adapter_type>(pimpl_->ctx(), buf);
+    buf->set_producer(adapter);
+    return subscribe(adapter->as_observer());
+  } else {
+    return {};
+  }
 }
 
 } // namespace caf::flow

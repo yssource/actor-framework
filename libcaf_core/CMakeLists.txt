@@ -228,6 +228,7 @@ caf_add_component(
     test/core-test.cpp
     test/nasty.cpp
   TEST_SUITES
+    # async.blocking_for_each
     actor_clock
     actor_factory
     actor_lifetime
@@ -237,7 +238,7 @@ caf_add_component(
     actor_system_config
     actor_termination
     aout
-    # async.blocking_for_each
+    async.bounded_buffer
     behavior
     binary_deserializer
     binary_serializer
