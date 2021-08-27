@@ -52,26 +52,27 @@ public:
     // nop
   }
 
-  constexpr intrusive_ptr(std::nullptr_t) noexcept : intrusive_ptr() {
+  constexpr intrusive_ptr(std::nullptr_t) noexcept : ptr_(nullptr) {
     // nop
   }
 
-  intrusive_ptr(pointer raw_ptr, bool add_ref = true) noexcept {
-    set_ptr(raw_ptr, add_ref);
+  intrusive_ptr(pointer ptr, bool add_ref = true) noexcept : ptr_(ptr) {
+    if (ptr_ && add_ref)
+      intrusive_ptr_add_ref(ptr_);
   }
 
   intrusive_ptr(intrusive_ptr&& other) noexcept : ptr_(other.detach()) {
     // nop
   }
 
-  intrusive_ptr(const intrusive_ptr& other) noexcept {
-    set_ptr(other.get(), true);
+  intrusive_ptr(const intrusive_ptr& other) noexcept : ptr_(other.ptr_) {
+    if (ptr_)
+      intrusive_ptr_add_ref(ptr_);
   }
 
-  template <class Y>
+  template <class Y, class = std::enable_if_t<std::is_convertible_v<Y*, T*>>>
   intrusive_ptr(intrusive_ptr<Y> other) noexcept : ptr_(other.detach()) {
-    static_assert(std::is_convertible<Y*, T*>::value,
-                  "Y* is not assignable to T*");
+    // nop
   }
 
   ~intrusive_ptr() {
@@ -98,9 +99,11 @@ public:
     return detach();
   }
 
-  void reset(pointer new_value = nullptr, bool add_ref = true) noexcept {
+  void reset(pointer ptr = nullptr, bool add_ref = true) noexcept {
     auto old = ptr_;
-    set_ptr(new_value, add_ref);
+    ptr_ = ptr;
+    if (ptr_ && add_ref)
+      intrusive_ptr_add_ref(ptr_);
     if (old)
       intrusive_ptr_release(old);
   }
@@ -168,12 +171,6 @@ public:
   }
 
 private:
-  void set_ptr(pointer raw_ptr, bool add_ref) noexcept {
-    ptr_ = raw_ptr;
-    if (raw_ptr && add_ref)
-      intrusive_ptr_add_ref(raw_ptr);
-  }
-
   pointer ptr_;
 };
 

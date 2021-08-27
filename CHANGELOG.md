@@ -10,6 +10,10 @@ is based on [Keep a Changelog](https://keepachangelog.com).
 - Since support of Qt 5 expired, we have ported the Qt examples to version 6.
   Hence, building the Qt examples now requires Qt in version 6.
 
+### Fixed
+
+- Silenced several warnings on GCC.
+
 ## [0.18.5] - 2021-07-16
 
 ### Fixed

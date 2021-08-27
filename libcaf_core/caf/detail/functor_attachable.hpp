@@ -23,7 +23,8 @@ public:
     // nop
   }
 
-  void actor_exited(const error& fail_state, execution_unit* host) override {
+  void actor_exited([[maybe_unused]] const error& fail_state,
+                    [[maybe_unused]] execution_unit* host) override {
     if constexpr (num_args == 0)
       fn_();
     else if constexpr (num_args == 1)
