@@ -152,6 +152,8 @@ std::string to_string(sec x) {
       return "caf::sec::broken_promise";
     case sec::connection_timeout:
       return "caf::sec::connection_timeout";
+    case sec::action_reschedule_failed:
+      return "caf::sec::action_reschedule_failed";
   };
 }
 
@@ -360,6 +362,9 @@ bool from_string(string_view in, sec& out) {
   } else if (in == "caf::sec::connection_timeout") {
     out = sec::connection_timeout;
     return true;
+  } else if (in == "caf::sec::action_reschedule_failed") {
+    out = sec::action_reschedule_failed;
+    return true;
   } else {
     return false;
   }
@@ -439,6 +444,7 @@ bool from_integer(std::underlying_type_t<sec> in,
     case sec::no_such_key:
     case sec::broken_promise:
     case sec::connection_timeout:
+    case sec::action_reschedule_failed:
       out = result;
       return true;
   };
